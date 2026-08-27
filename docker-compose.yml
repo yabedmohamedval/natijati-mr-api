@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: national-exams-postgres
+    environment:
+      POSTGRES_DB: national_exams
+      POSTGRES_USER: national_exams
+      POSTGRES_PASSWORD: national_exams
+    ports:
+      - "5433:5432"
+    volumes:
+      - national_exams_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U national_exams -d national_exams"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  national_exams_postgres_data:
