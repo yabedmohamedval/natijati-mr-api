@@ -1,5 +1,6 @@
 package mr.natijati.results.api.publicdata.dto;
 
+import mr.natijati.results.exam.SessionType;
 import java.math.BigDecimal;
 
 public record InstitutionSummaryResponse(
@@ -13,6 +14,7 @@ public record InstitutionSummaryResponse(
     long candidateCount,
     long admittedCount,
     BigDecimal averageScore,
-    double successRate
+    double successRate,
+    SessionType sessionType
 ) {
 }

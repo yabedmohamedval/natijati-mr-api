@@ -1,6 +1,7 @@
 package mr.natijati.results.api.publicdata;
 
 import mr.natijati.results.api.publicdata.dto.*;
+import mr.natijati.results.exam.SessionType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,8 +50,8 @@ public class PublicCatalogService {
         return repository.search(criteria);
     }
 
-    public StatisticsResponse statistics(String examType, Integer year) {
-        return repository.statistics(examType, year);
+    public StatisticsResponse statistics(String examType, Integer year, SessionType sessionType) {
+        return repository.statistics(examType, year, sessionType);
     }
 
     public PageResponse<InstitutionSummaryResponse> institutions(
@@ -58,14 +59,15 @@ public class PublicCatalogService {
         Integer year,
         String query,
         Integer page,
-        Integer size
+        Integer size,
+        SessionType sessionType
     ) {
         int safePage = page == null || page < 0 ? 0 : page;
         int safeSize = size == null ? 20 : Math.min(Math.max(size, 1), 50);
-        return repository.findInstitutions(examType, year, query, safePage, safeSize);
+        return repository.findInstitutions(examType, year, query, safePage, safeSize, sessionType);
     }
 
-    public InstitutionDetailResponse institution(String id) {
-        return repository.findInstitution(id);
+    public InstitutionDetailResponse institution(String id, SessionType sessionType) {
+        return repository.findInstitution(id, sessionType);
     }
 }

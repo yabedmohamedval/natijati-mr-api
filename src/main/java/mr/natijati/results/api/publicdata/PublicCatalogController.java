@@ -3,6 +3,7 @@ package mr.natijati.results.api.publicdata;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import mr.natijati.results.api.publicdata.dto.*;
+import mr.natijati.results.exam.SessionType;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,7 +32,8 @@ public class PublicCatalogController {
     }
 
     @GetMapping("/search")
-    @Operation(summary = "Recherche publique avancée")
+    @Operation(summary = "Recherche publique avancée",
+        description = "candidateNumber désigne le numéro de dossier pour C1AS, le numéro de candidat pour BAC et BEPC. Sans sessionType, la session NORMAL est sélectionnée.")
     public PageResponse<SearchResultItem> search(
         @RequestParam String examType,
         @RequestParam Integer year,
@@ -41,7 +43,8 @@ public class PublicCatalogController {
         @RequestParam(required = false) String series,
         @RequestParam(required = false) String institution,
         @RequestParam(defaultValue = "0") Integer page,
-        @RequestParam(defaultValue = "20") Integer size
+        @RequestParam(defaultValue = "20") Integer size,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
         return service.search(new SearchCriteria(
             examType,
@@ -52,7 +55,8 @@ public class PublicCatalogController {
             series,
             institution,
             page,
-            size
+            size,
+            sessionType
         ));
     }
 
@@ -60,9 +64,10 @@ public class PublicCatalogController {
     @Operation(summary = "Statistiques publiques d'un examen")
     public StatisticsResponse statistics(
         @PathVariable String examType,
-        @PathVariable Integer year
+        @PathVariable Integer year,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
-        return service.statistics(examType, year);
+        return service.statistics(examType, year, sessionType);
     }
 
     @GetMapping("/institutions")
@@ -72,14 +77,18 @@ public class PublicCatalogController {
         @RequestParam Integer year,
         @RequestParam(required = false) String query,
         @RequestParam(defaultValue = "0") Integer page,
-        @RequestParam(defaultValue = "20") Integer size
+        @RequestParam(defaultValue = "20") Integer size,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
-        return service.institutions(examType, year, query, page, size);
+        return service.institutions(examType, year, query, page, size, sessionType);
     }
 
     @GetMapping("/institutions/{id}")
     @Operation(summary = "Afficher le détail d'un établissement")
-    public InstitutionDetailResponse institution(@PathVariable String id) {
-        return service.institution(id);
+    public InstitutionDetailResponse institution(
+        @PathVariable String id,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
+    ) {
+        return service.institution(id, sessionType);
     }
 }

@@ -1,5 +1,6 @@
 package mr.natijati.results.api;
 
+import mr.natijati.results.exam.SessionType;
 import java.math.BigDecimal;
 
 public record PublicResultResponse(
@@ -20,6 +21,7 @@ public record PublicResultResponse(
     BigDecimal score,
     String scoreLabel,
     String decisionCode,
-    String decisionLabel
+    String decisionLabel,
+    SessionType sessionType
 ) {
 }

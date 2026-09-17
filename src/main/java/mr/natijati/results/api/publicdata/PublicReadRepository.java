@@ -1,6 +1,7 @@
 package mr.natijati.results.api.publicdata;
 
 import mr.natijati.results.api.publicdata.dto.*;
+import mr.natijati.results.exam.SessionType;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -76,12 +77,12 @@ public class PublicReadRepository {
         };
     }
 
-    public StatisticsResponse statistics(String examType, Integer year) {
+    public StatisticsResponse statistics(String examType, Integer year, SessionType sessionType) {
         String normalized = normalizeExamType(examType);
         return switch (normalized) {
-            case "BAC" -> bacStatistics(year);
-            case "BEPC" -> bepcStatistics(year);
-            case "C1AS" -> c1asStatistics(year);
+            case "BAC" -> bacStatistics(year, sessionType);
+            case "BEPC" -> bepcStatistics(year, sessionType);
+            case "C1AS" -> c1asStatistics(year, sessionType);
             default -> throw new IllegalArgumentException("Type d'examen non supporté: " + normalized);
         };
     }
@@ -91,25 +92,27 @@ public class PublicReadRepository {
         Integer year,
         String query,
         int page,
-        int size
+        int size,
+        SessionType sessionType
     ) {
         String normalized = normalizeExamType(examType);
         return switch (normalized) {
-            case "BAC" -> bacInstitutions(year, query, page, size);
-            case "BEPC" -> bepcInstitutions(year, query, page, size);
-            case "C1AS" -> c1asInstitutions(year, query, page, size);
+            case "BAC" -> bacInstitutions(year, query, page, size, sessionType);
+            case "BEPC" -> bepcInstitutions(year, query, page, size, sessionType);
+            case "C1AS" -> c1asInstitutions(year, query, page, size, sessionType);
             default -> throw new IllegalArgumentException("Type d'examen non supporté: " + normalized);
         };
     }
 
-    public InstitutionDetailResponse findInstitution(String id) {
+    public InstitutionDetailResponse findInstitution(String id, SessionType sessionType) {
         InstitutionKeyCodec.DecodedInstitutionKey key = institutionKeyCodec.decode(id);
         PageResponse<InstitutionSummaryResponse> page = findInstitutions(
             key.examType(),
             key.year(),
             key.institutionName(),
             0,
-            10
+            10,
+            sessionType
         );
 
         InstitutionSummaryResponse summary = page.content().stream()
@@ -118,8 +121,8 @@ public class PublicReadRepository {
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Établissement introuvable"));
 
-        List<DistributionItemResponse> decisions = institutionDecisionDistribution(key);
-        List<DistributionItemResponse> series = institutionSeriesDistribution(key);
+        List<DistributionItemResponse> decisions = institutionDecisionDistribution(key, sessionType);
+        List<DistributionItemResponse> series = institutionSeriesDistribution(key, sessionType);
 
         return new InstitutionDetailResponse(summary, decisions, series);
     }
@@ -128,6 +131,7 @@ public class PublicReadRepository {
         String select = """
             SELECT 'BAC' AS exam_type,
                    es.exam_year AS year,
+                   es.session_type,
                    br.candidate_number::text AS identifier,
                    br.name_fr,
                    br.name_ar,
@@ -143,6 +147,7 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'BAC'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         QueryParts parts = buildSearchQuery(select, c,
@@ -159,6 +164,7 @@ public class PublicReadRepository {
         String select = """
             SELECT 'BEPC' AS exam_type,
                    es.exam_year AS year,
+                   es.session_type,
                    br.candidate_number::text AS identifier,
                    br.name_fr,
                    NULL::text AS name_ar,
@@ -174,6 +180,7 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'BEPC'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         QueryParts parts = buildSearchQuery(select, c,
@@ -190,7 +197,8 @@ public class PublicReadRepository {
         String select = """
             SELECT 'C1AS' AS exam_type,
                    es.exam_year AS year,
-                   br.candidate_number::text AS identifier,
+                   es.session_type,
+                   br.dossier_number::text AS identifier,
                    NULL::text AS name_fr,
                    br.name_ar,
                    NULL::text AS wilaya_fr,
@@ -205,10 +213,11 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'C1AS'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         QueryParts parts = buildSearchQuery(select, c,
-            "br.candidate_number",
+            "br.dossier_number",
             null, "br.name_ar",
             null, "br.wilaya_ar",
             null, null, null,
@@ -232,7 +241,8 @@ public class PublicReadRepository {
         String institutionArColumn
     ) {
         StringBuilder sql = new StringBuilder(select);
-        MapSqlParameterSource params = new MapSqlParameterSource("year", c.year());
+        MapSqlParameterSource params = new MapSqlParameterSource("year", c.year())
+            .addValue("sessionType", c.sessionType().name());
 
         if (hasText(c.candidateNumber())) {
             sql.append(" AND ").append(candidateColumn).append("::text = :candidateNumber");
@@ -273,12 +283,14 @@ public class PublicReadRepository {
             rs.getString("institution_ar"),
             rs.getBigDecimal("score"),
             rs.getString("decision_code"),
-            rs.getString("decision_label")
+            rs.getString("decision_label"),
+            SessionType.valueOf(rs.getString("session_type"))
         );
     }
 
-    private StatisticsResponse bacStatistics(Integer year) {
-        MapSqlParameterSource params = new MapSqlParameterSource("year", year);
+    private StatisticsResponse bacStatistics(Integer year, SessionType sessionType) {
+        MapSqlParameterSource params = new MapSqlParameterSource("year", year)
+            .addValue("sessionType", sessionType.name());
         String summarySql = """
             SELECT COUNT(*) AS candidate_count,
                    COUNT(*) FILTER (WHERE br.decision_code = 'ADMITTED') AS admitted_count,
@@ -291,20 +303,23 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'BAC'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         return statisticsFromSummary(
             "BAC",
             year,
+            sessionType,
             summarySql,
             params,
-            distribution("bac_result", "wilaya_fr", "wilaya_fr", "wilaya_ar", year, "BAC"),
-            distribution("bac_result", "series_code", "series_fr", "series_ar", year, "BAC")
+            distribution("bac_result", "wilaya_fr", "wilaya_fr", "wilaya_ar", year, "BAC", sessionType),
+            distribution("bac_result", "series_code", "series_fr", "series_ar", year, "BAC", sessionType)
         );
     }
 
-    private StatisticsResponse bepcStatistics(Integer year) {
-        MapSqlParameterSource params = new MapSqlParameterSource("year", year);
+    private StatisticsResponse bepcStatistics(Integer year, SessionType sessionType) {
+        MapSqlParameterSource params = new MapSqlParameterSource("year", year)
+            .addValue("sessionType", sessionType.name());
         String summarySql = """
             SELECT COUNT(*) AS candidate_count,
                    COUNT(*) FILTER (WHERE br.decision_code = 'ADMITTED') AS admitted_count,
@@ -317,20 +332,23 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'BEPC'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         return statisticsFromSummary(
             "BEPC",
             year,
+            sessionType,
             summarySql,
             params,
-            distribution("bepc_result", "wilaya_fr", "wilaya_fr", null, year, "BEPC"),
+            distribution("bepc_result", "wilaya_fr", "wilaya_fr", null, year, "BEPC", sessionType),
             List.of()
         );
     }
 
-    private StatisticsResponse c1asStatistics(Integer year) {
-        MapSqlParameterSource params = new MapSqlParameterSource("year", year);
+    private StatisticsResponse c1asStatistics(Integer year, SessionType sessionType) {
+        MapSqlParameterSource params = new MapSqlParameterSource("year", year)
+            .addValue("sessionType", sessionType.name());
         String sql = """
             SELECT COUNT(*) AS candidate_count,
                    AVG(br.total_score) AS average_score
@@ -339,6 +357,7 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'C1AS'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
             """;
 
         Map<String, Object> row = jdbc.queryForMap(sql, params);
@@ -355,14 +374,16 @@ public class PublicReadRepository {
             0,
             average,
             0,
-            distribution("c1as_result", "wilaya_ar", null, "wilaya_ar", year, "C1AS"),
-            List.of()
+            distribution("c1as_result", "wilaya_ar", null, "wilaya_ar", year, "C1AS", sessionType),
+            List.of(),
+            sessionType
         );
     }
 
     private StatisticsResponse statisticsFromSummary(
         String examType,
         Integer year,
+        SessionType sessionType,
         String sql,
         MapSqlParameterSource params,
         List<DistributionItemResponse> byWilaya,
@@ -388,7 +409,8 @@ public class PublicReadRepository {
             average,
             round2(successRate),
             byWilaya,
-            bySeries
+            bySeries,
+            sessionType
         );
     }
 
@@ -398,7 +420,8 @@ public class PublicReadRepository {
         String labelFrColumn,
         String labelArColumn,
         Integer year,
-        String examType
+        String examType,
+        SessionType sessionType
     ) {
         String labelFr = labelFrColumn == null ? "NULL::text" : "br." + labelFrColumn;
         String labelAr = labelArColumn == null ? "NULL::text" : "br." + labelArColumn;
@@ -406,12 +429,13 @@ public class PublicReadRepository {
 
         String sql = "SELECT " + code + "::text AS code, " + labelFr + " AS label_fr, " + labelAr + " AS label_ar, COUNT(*) AS item_count "
             + "FROM " + table + " br JOIN exam_session es ON es.id = br.exam_session_id "
-            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year "
+            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year AND es.session_type = :sessionType "
             + "GROUP BY " + code + ", " + labelFr + ", " + labelAr + " ORDER BY item_count DESC LIMIT 20";
 
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("examType", examType)
-            .addValue("year", year);
+            .addValue("year", year)
+            .addValue("sessionType", sessionType.name());
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql, params);
         long total = rows.stream().mapToLong(row -> number(row.get("item_count")).longValue()).sum();
@@ -428,23 +452,23 @@ public class PublicReadRepository {
         }).toList();
     }
 
-    private PageResponse<InstitutionSummaryResponse> bacInstitutions(Integer year, String query, int page, int size) {
+    private PageResponse<InstitutionSummaryResponse> bacInstitutions(Integer year, String query, int page, int size, SessionType sessionType) {
         return institutions(
-            "BAC", year, query, page, size,
+            "BAC", year, query, page, size, sessionType,
             "bac_result", "institution_fr", "institution_ar", "wilaya_fr", "wilaya_ar", "score", "decision_code"
         );
     }
 
-    private PageResponse<InstitutionSummaryResponse> bepcInstitutions(Integer year, String query, int page, int size) {
+    private PageResponse<InstitutionSummaryResponse> bepcInstitutions(Integer year, String query, int page, int size, SessionType sessionType) {
         return institutions(
-            "BEPC", year, query, page, size,
+            "BEPC", year, query, page, size, sessionType,
             "bepc_result", "exam_center_fr", null, "wilaya_fr", null, "score", "decision_code"
         );
     }
 
-    private PageResponse<InstitutionSummaryResponse> c1asInstitutions(Integer year, String query, int page, int size) {
+    private PageResponse<InstitutionSummaryResponse> c1asInstitutions(Integer year, String query, int page, int size, SessionType sessionType) {
         return institutions(
-            "C1AS", year, query, page, size,
+            "C1AS", year, query, page, size, sessionType,
             "c1as_result", null, "school_ar", null, "wilaya_ar", "total_score", null
         );
     }
@@ -455,6 +479,7 @@ public class PublicReadRepository {
         String query,
         int page,
         int size,
+        SessionType sessionType,
         String table,
         String nameFrColumn,
         String nameArColumn,
@@ -479,11 +504,12 @@ public class PublicReadRepository {
             + wilayaFr + " AS wilaya_fr, " + wilayaAr + " AS wilaya_ar, "
             + "COUNT(*) AS candidate_count, " + admitted + " AS admitted_count, AVG(br." + scoreColumn + ") AS average_score "
             + "FROM " + table + " br JOIN exam_session es ON es.id = br.exam_session_id "
-            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year");
+            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year AND es.session_type = :sessionType");
 
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("examType", examType)
-            .addValue("year", year);
+            .addValue("year", year)
+            .addValue("sessionType", sessionType.name());
 
         if (hasText(query)) {
             List<String> filters = new ArrayList<>();
@@ -519,7 +545,8 @@ public class PublicReadRepository {
                 candidateCount,
                 admittedCount,
                 rs.getBigDecimal("average_score"),
-                round2(successRate)
+                round2(successRate),
+                sessionType
             );
         });
 
@@ -527,7 +554,8 @@ public class PublicReadRepository {
     }
 
     private List<DistributionItemResponse> institutionDecisionDistribution(
-        InstitutionKeyCodec.DecodedInstitutionKey key
+        InstitutionKeyCodec.DecodedInstitutionKey key,
+        SessionType sessionType
     ) {
         if ("C1AS".equals(key.examType())) {
             return List.of();
@@ -538,12 +566,13 @@ public class PublicReadRepository {
 
         String sql = "SELECT COALESCE(br.decision_code, 'UNKNOWN') AS code, COUNT(*) AS item_count "
             + "FROM " + table + " br JOIN exam_session es ON es.id = br.exam_session_id "
-            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year "
+            + "WHERE es.status = 'PUBLISHED' AND es.exam_type = :examType AND es.exam_year = :year AND es.session_type = :sessionType "
             + "AND br." + institutionColumn + " = :institution GROUP BY br.decision_code ORDER BY item_count DESC";
 
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("examType", key.examType())
             .addValue("year", key.year())
+            .addValue("sessionType", sessionType.name())
             .addValue("institution", key.institutionName());
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql, params);
@@ -563,7 +592,8 @@ public class PublicReadRepository {
     }
 
     private List<DistributionItemResponse> institutionSeriesDistribution(
-        InstitutionKeyCodec.DecodedInstitutionKey key
+        InstitutionKeyCodec.DecodedInstitutionKey key,
+        SessionType sessionType
     ) {
         if (!"BAC".equals(key.examType())) {
             return List.of();
@@ -579,6 +609,7 @@ public class PublicReadRepository {
             WHERE es.status = 'PUBLISHED'
               AND es.exam_type = 'BAC'
               AND es.exam_year = :year
+              AND es.session_type = :sessionType
               AND br.institution_fr = :institution
             GROUP BY br.series_code
             ORDER BY item_count DESC
@@ -586,6 +617,7 @@ public class PublicReadRepository {
 
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("year", key.year())
+            .addValue("sessionType", sessionType.name())
             .addValue("institution", key.institutionName());
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql, params);

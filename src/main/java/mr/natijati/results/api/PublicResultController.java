@@ -34,14 +34,15 @@ public class PublicResultController {
     @Operation(summary = "Chercher un résultat BAC par numéro")
     public PublicResultResponse findBac(
         @PathVariable Integer year,
-        @PathVariable Long candidateNumber
+        @PathVariable Long candidateNumber,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
         log.info("requesting the note of student {}", candidateNumber);
         BacResult result = bacResultRepository
             .findByExamSession_ExamTypeAndExamSession_YearAndExamSession_SessionTypeAndExamSession_StatusAndCandidateNumber(
                 ExamType.BAC,
                 year,
-                SessionType.NORMAL,
+                sessionType,
                 PublicationStatus.PUBLISHED,
                 candidateNumber
             )
@@ -65,7 +66,8 @@ public class PublicResultController {
             result.getScore(),
             "Moyenne",
             result.getDecisionCode() == null ? null : result.getDecisionCode().name(),
-            result.getDecisionOriginal()
+            result.getDecisionOriginal(),
+            sessionType
         );
     }
 
@@ -73,13 +75,14 @@ public class PublicResultController {
     @Operation(summary = "Chercher un résultat BEPC par numéro")
     public PublicResultResponse findBepc(
         @PathVariable Integer year,
-        @PathVariable Long candidateNumber
+        @PathVariable Long candidateNumber,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
         BepcResult result = bepcResultRepository
             .findByExamSession_ExamTypeAndExamSession_YearAndExamSession_SessionTypeAndExamSession_StatusAndCandidateNumber(
                 ExamType.BEPC,
                 year,
-                SessionType.NORMAL,
+                sessionType,
                 PublicationStatus.PUBLISHED,
                 candidateNumber
             )
@@ -103,7 +106,8 @@ public class PublicResultController {
             result.getScore(),
             "Moyenne",
             result.getDecisionCode() == null ? null : result.getDecisionCode().name(),
-            result.getDecisionOriginal()
+            result.getDecisionOriginal(),
+            sessionType
         );
     }
 
@@ -111,13 +115,14 @@ public class PublicResultController {
     @Operation(summary = "Chercher un résultat C1AS par numéro de dossier")
     public PublicResultResponse findC1as(
         @PathVariable Integer year,
-        @PathVariable Long dossierNumber
+        @PathVariable Long dossierNumber,
+        @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
         C1asResult result = c1asResultRepository
             .findByExamSession_ExamTypeAndExamSession_YearAndExamSession_SessionTypeAndExamSession_StatusAndDossierNumber(
                 ExamType.C1AS,
                 year,
-                SessionType.NORMAL,
+                sessionType,
                 PublicationStatus.PUBLISHED,
                 dossierNumber
             )
@@ -141,7 +146,8 @@ public class PublicResultController {
             result.getTotalScore(),
             "Total",
             null,
-            null
+            null,
+            sessionType
         );
     }
 }

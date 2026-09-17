@@ -1,5 +1,6 @@
 package mr.natijati.results.api.publicdata.dto;
 
+import mr.natijati.results.exam.SessionType;
 import java.math.BigDecimal;
 
 public record SearchResultItem(
@@ -14,6 +15,7 @@ public record SearchResultItem(
     String institutionAr,
     BigDecimal score,
     String decisionCode,
-    String decisionLabel
+    String decisionLabel,
+    SessionType sessionType
 ) {
 }
