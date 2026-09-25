@@ -19,5 +19,7 @@ public interface BepcResultRepository extends JpaRepository<BepcResult, Long> {
 
     long countByExamSession_Id(Long sessionId);
 
-    void deleteByExamSession_Id(Long sessionId);
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from BepcResult r where r.examSession.id = :sessionId")
+    void deleteByExamSession_Id(@org.springframework.data.repository.query.Param("sessionId") Long sessionId);
 }

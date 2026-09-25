@@ -30,7 +30,7 @@ public class ExamResultProcessor
 
         return new BacResultCommand(
             requiredLong(row, "NUM_BAC"),
-            value(row, "NOM_FR"),
+            requiredText(row, "NOM_FR"),
             value(row, "NOM_AR"),
             value(row, "WILAYA_FR"),
             value(row, "WILAYA_AR"),
@@ -41,8 +41,8 @@ public class ExamResultProcessor
             value(row, "SERIE"),
             value(row, "SERIE_FR"),
             value(row, "SERIE_AR"),
-            optionalDecimal(row, "MOY_BAC"),
-            DecisionNormalizer.normalize(decision),
+            score(row, "MOY_BAC", decision),
+            decision(row, decision),
             decision
         );
     }
@@ -56,8 +56,8 @@ public class ExamResultProcessor
             optionalInteger(row, "CODE_WILAYA"),
             value(row, "WILAYA"),
             value(row, "CENTRE"),
-            optionalDecimal(row, "MOYG"),
-            DecisionNormalizer.normalize(decision),
+            score(row, "MOYG", decision),
+            decision(row, decision),
             decision
         );
     }
@@ -72,81 +72,87 @@ public class ExamResultProcessor
             value(row, "WILAYA_AR"),
             value(row, "MOUGHATAA_AR"),
             value(row, "CENTRE_EXAMEN_AR"),
-            optionalDecimal(row, "TOTAL")
+            score(row, "TOTAL", null)
         );
     }
 
+    private InvalidExamRowException invalid(RawExamRow row, String field, String reason) {
+        return new InvalidExamRowException(examType, row.rowNumber(), field, reason);
+    }
+
+    private DecisionCode decision(RawExamRow row, String raw) {
+        DecisionCode code = DecisionNormalizer.normalize(raw);
+        if (code == DecisionCode.UNKNOWN) throw invalid(row, "DECISION", "Décision absente ou inconnue");
+        return code;
+    }
+
     private String requiredText(RawExamRow row, String key) {
-        String value = value(row, key);
-        if (value.isBlank()) {
-            throw new InvalidExamRowException(
-                row.rowNumber(),
-                "la colonne " + key + " est vide"
-            );
-        }
-        return value;
+        String text = value(row, key);
+        if (text.isBlank()) throw invalid(row, key, "Valeur obligatoire");
+        return text;
     }
 
     private Long requiredLong(RawExamRow row, String key) {
-        Long value = optionalLong(row, key);
-        if (value == null) {
-            throw new InvalidExamRowException(
-                row.rowNumber(),
-                "la colonne " + key + " est vide"
-            );
-        }
-        return value;
+        Long number = optionalLong(row, key);
+        if (number == null) throw invalid(row, key, "Identifiant obligatoire");
+        return number;
     }
 
     private Long optionalLong(RawExamRow row, String key) {
-        String value = value(row, key);
-        if (value.isBlank()) {
-            return null;
-        }
-
+        String text = value(row, key);
+        if (text.isBlank()) return null;
         try {
-            return decimal(value).longValueExact();
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new InvalidExamRowException(
-                row.rowNumber(),
-                key + " n'est pas un entier valide : " + value,
-                exception
-            );
+            long number = decimal(text).longValueExact();
+            if (number <= 0) throw invalid(row, key, "Entier strictement positif requis");
+            return number;
+        } catch (ArithmeticException | NumberFormatException ex) {
+            throw invalid(row, key, "Entier invalide ou hors capacité");
         }
     }
 
     private Integer optionalInteger(RawExamRow row, String key) {
-        Long value = optionalLong(row, key);
-        return value == null ? null : Math.toIntExact(value);
+        Long number = optionalLong(row, key);
+        if (number == null) return null;
+        if (number > Integer.MAX_VALUE) throw invalid(row, key, "Entier hors capacité");
+        return number.intValue();
     }
 
-    private BigDecimal optionalDecimal(RawExamRow row, String key) {
-        String value = value(row, key);
-        if (value.isBlank()) {
-            return null;
+    private BigDecimal score(RawExamRow row, String key, String rawDecision) {
+        String text = value(row, key);
+        if (text.isBlank() && rawDecision != null) {
+            DecisionCode code = decision(row, rawDecision);
+            if (code == DecisionCode.ABSENT || code == DecisionCode.CANCELLED) return null;
         }
-
+        if (text.isBlank()) throw invalid(row, key, "Score obligatoire");
         try {
-            return decimal(value);
-        } catch (NumberFormatException exception) {
-            throw new InvalidExamRowException(
-                row.rowNumber(),
-                key + " n'est pas un nombre valide : " + value,
-                exception
-            );
+            BigDecimal score = decimal(text).stripTrailingZeros();
+            if (score.signum() < 0 || (examType != ExamType.C1AS && score.compareTo(BigDecimal.valueOf(20)) > 0))
+                throw invalid(row, key, "Score hors plage");
+            // NUMERIC(18,12): no silent rounding or overflow. C1AS has no assumed academic ceiling.
+            if (score.scale() > 12 || (long) score.precision() - score.scale() > 6)
+                throw invalid(row, key, "Score incompatible avec NUMERIC(18,12)");
+            return score;
+        } catch (NumberFormatException ex) {
+            throw invalid(row, key, "Score numérique invalide");
         }
     }
 
     private BigDecimal decimal(String value) {
-        return new BigDecimal(
-            value.replace("\u00a0", "")
-                .replace(" ", "")
-                .replace(',', '.')
-        );
+        String normalized = value.replace("\u00a0", "").replace(" ", "").replace(',', '.');
+        if (normalized.length() > 64) throw new NumberFormatException("Nombre trop long");
+        BigDecimal number = new BigDecimal(normalized);
+        if (number.scale() < -1000 || number.scale() > 1000) throw new NumberFormatException("Exposant hors limites");
+        return number;
     }
 
     private String value(RawExamRow row, String key) {
-        Map<String, String> values = row.values();
-        return values.getOrDefault(key, "").trim();
+        String text = row.values().getOrDefault(key, "").trim();
+        int max = switch (key) {
+            case "SERIE", "TYPE" -> 30;
+            case "WILAYA_FR", "WILAYA_AR", "WILAYA", "MOUGHATAA_AR", "SERIE_FR", "SERIE_AR", "DECISION" -> 150;
+            default -> 255;
+        };
+        if (text.length() > max) throw invalid(row, key, "Texte trop long (maximum " + max + ")");
+        return text;
     }
 }

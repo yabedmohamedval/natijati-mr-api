@@ -13,7 +13,7 @@ public final class ExcelHeaderNormalizer {
             return "";
         }
 
-        String withoutAccents = Normalizer.normalize(value, Normalizer.Form.NFD)
+        String withoutAccents = Normalizer.normalize(value.replaceAll("\\p{Cf}", ""), Normalizer.Form.NFD)
             .replaceAll("\\p{M}", "");
 
         return withoutAccents

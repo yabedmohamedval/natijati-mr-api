@@ -80,6 +80,7 @@ public class ExamSession {
 
     public void markFailed() {
         this.status = PublicationStatus.FAILED;
+        this.resultCount = 0;
     }
 
     public void publish() {

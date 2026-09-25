@@ -26,13 +26,13 @@ public final class DecisionNormalizer {
         if (value.equals("AJOURNE") || value.equals("AJOURNEE")) {
             return DecisionCode.FAILED;
         }
-        if (value.contains("SESSIONNAIRE")) {
+        if (value.equals("SESSIONNAIRE")) {
             return DecisionCode.SECOND_SESSION;
         }
-        if (value.contains("ANNULATION")) {
+        if ((value.equals("ANNULATION") || value.equals("ANNULATION DE L’EXAMEN") || value.equals("ANNULATION DE L\'EXAMEN"))) {
             return DecisionCode.CANCELLED;
         }
-        if (value.contains("ABSENT")) {
+        if ((value.equals("ABSENT") || value.equals("ABSENTE"))) {
             return DecisionCode.ABSENT;
         }
 

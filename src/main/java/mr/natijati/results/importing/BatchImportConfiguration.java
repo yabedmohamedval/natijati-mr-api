@@ -29,11 +29,12 @@ public class BatchImportConfiguration {
     @StepScope
     public ItemStreamReader<RawExamRow> excelResultItemReader(
         @Value("#{jobParameters['filePath']}") String filePath,
-        @Value("#{jobParameters['examType']}") String examType
+        @Value("#{jobParameters['examType']}") String examType,
+        @Value("${app.import-max-rows:100000}") int maxRows
     ) {
         return new ExcelResultItemReader(
             Path.of(filePath),
-            ExamType.valueOf(examType)
+            ExamType.valueOf(examType), maxRows
         );
     }
 
@@ -86,6 +87,7 @@ public class BatchImportConfiguration {
         ExamSessionService sessionService
     ) {
         return new JobBuilder("examResultImportJob", jobRepository)
+            .preventRestart()
             .listener(new ImportJobListener(sessionService))
             .start(importExamResultsStep)
             .build();

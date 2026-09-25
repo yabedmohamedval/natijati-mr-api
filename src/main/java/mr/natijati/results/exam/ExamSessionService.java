@@ -9,17 +9,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ExamSessionService {
 
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final ExamSessionRepository sessionRepository;
     private final BacResultRepository bacResultRepository;
     private final BepcResultRepository bepcResultRepository;
     private final C1asResultRepository c1asResultRepository;
 
     public ExamSessionService(
+        org.springframework.jdbc.core.JdbcTemplate jdbc,
         ExamSessionRepository sessionRepository,
         BacResultRepository bacResultRepository,
         BepcResultRepository bepcResultRepository,
         C1asResultRepository c1asResultRepository
     ) {
+        this.jdbc = jdbc;
         this.sessionRepository = sessionRepository;
         this.bacResultRepository = bacResultRepository;
         this.bepcResultRepository = bepcResultRepository;
@@ -33,18 +36,24 @@ public class ExamSessionService {
         SessionType sessionType,
         String filename
     ) {
+        if (year < 1900 || year > 2100) throw new IllegalArgumentException("Année hors plage 1900–2100");
+        // Transaction-scoped lock works with PostgreSQL transaction poolers, including a new session.
+        Boolean acquired = jdbc.queryForObject("SELECT pg_try_advisory_xact_lock(hashtextextended(?, 0))", Boolean.class,
+            examType.name() + ":" + year + ":" + sessionType.name());
+        if (!Boolean.TRUE.equals(acquired)) throw new IllegalStateException("Un import réserve déjà cette session");
         ExamSession session = sessionRepository
             .findByExamTypeAndYearAndSessionType(examType, year, sessionType)
             .orElseGet(() -> ExamSession.create(examType, year, sessionType, filename));
 
-        if (session.getStatus() == PublicationStatus.PUBLISHED) {
+        if (session.getStatus() == PublicationStatus.PUBLISHED || session.getStatus() == PublicationStatus.READY
+            || session.getStatus() == PublicationStatus.IMPORTING) {
             throw new IllegalStateException(
-                "Cette session est déjà publiée. Une correction devra utiliser "
-                    + "un mécanisme de versionnement."
+                "Session déjà en cours, prête ou publiée : remplacement interdit"
             );
         }
 
         session.prepareForImport(filename);
+        session.markImporting();
         ExamSession saved = sessionRepository.save(session);
         deleteExistingResults(saved);
         return saved;
@@ -52,26 +61,33 @@ public class ExamSessionService {
 
     @Transactional
     public void markImporting(Long sessionId) {
-        ExamSession session = getRequired(sessionId);
-        session.markImporting();
+        ExamSession session = locked(sessionId);
+        if (session.getStatus() != PublicationStatus.IMPORTING) throw new IllegalStateException("Session non réservée pour import");
     }
 
     @Transactional
     public void markReady(Long sessionId) {
-        ExamSession session = getRequired(sessionId);
-        session.markReady(countResults(session));
+        ExamSession session = locked(sessionId);
+        long count = countResults(session);
+        if (session.getStatus() != PublicationStatus.IMPORTING || count == 0)
+            throw new IllegalStateException("Une session vide ou non IMPORTING ne peut pas devenir READY");
+        session.markReady(count);
     }
 
     @Transactional
     public void markFailed(Long sessionId) {
-        ExamSession session = getRequired(sessionId);
+        ExamSession session = locked(sessionId);
+        if (session.getStatus() != PublicationStatus.IMPORTING && session.getStatus() != PublicationStatus.FAILED)
+            throw new IllegalStateException("Nettoyage interdit pour cette session");
+        deleteExistingResults(session);
         session.markFailed();
     }
 
     @Transactional
     public ExamSession publish(Long sessionId) {
-        ExamSession session = getRequired(sessionId);
-        if (session.getStatus() != PublicationStatus.READY) {
+        ExamSession session = locked(sessionId);
+        if (session.getStatus() == PublicationStatus.PUBLISHED) return session;
+        if (session.getStatus() != PublicationStatus.READY || session.getResultCount() <= 0 || countResults(session) != session.getResultCount()) {
             throw new IllegalStateException(
                 "La session doit être READY avant publication. Statut actuel : "
                     + session.getStatus()
@@ -87,6 +103,10 @@ public class ExamSessionService {
             .orElseThrow(() -> new IllegalArgumentException(
                 "Session introuvable : " + sessionId
             ));
+    }
+
+    private ExamSession locked(Long id) {
+        return sessionRepository.findLockedById(id).orElseThrow(() -> new IllegalArgumentException("Session introuvable : " + id));
     }
 
     private void deleteExistingResults(ExamSession session) {
