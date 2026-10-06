@@ -8,12 +8,12 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
-  hikari:
-    maximum-pool-size: ${DB_POOL_SIZE:5}
-    minimum-idle: ${DB_MIN_IDLE:0}
-    connection-timeout: 30000
-    idle-timeout: 600000
-    max-lifetime: 1800000
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: ${DB_MIN_IDLE:0}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:30000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
 
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
@@ -44,6 +44,11 @@ spring:
       max-request-size: 50MB
 
 server:
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
   port: ${PORT:8080}
   compression:
     enabled: true
@@ -59,7 +64,18 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
 
 springdoc:
   swagger-ui:
@@ -72,4 +88,4 @@ app:
   import-directory: ${IMPORT_DIRECTORY:./imports}
   admin:
     username: ${ADMIN_USERNAME:admin}
-    password: ${ADMIN_PASSWORD:change-me-now}
+    password: ${ADMIN_PASSWORD}

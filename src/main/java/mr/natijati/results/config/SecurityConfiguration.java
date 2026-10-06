@@ -35,10 +35,14 @@ public class SecurityConfiguration {
                         .requestMatchers(
                                 "/api/public/**",
                                 "/actuator/health",
+                                "/actuator/health/liveness",
+                                "/actuator/health/readiness",
                                 "/error",
+                                "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
+                        .requestMatchers("/actuator/metrics", "/actuator/metrics/**").hasRole("ADMIN")
                         .requestMatchers("/api/admin/**").authenticated()
                         .anyRequest().denyAll()
                 )
@@ -55,7 +59,8 @@ public class SecurityConfiguration {
         configuration.setAllowedOrigins(List.of(
                 "http://localhost:4200",
                 "https://natijati-mr-3232f.web.app",
-                "https://natijati-mr-3232f.firebaseapp.com"
+                "https://natijati-mr-3232f.firebaseapp.com",
+                "https://natijati-mr.online"
         ));
 
         configuration.setAllowedMethods(List.of(

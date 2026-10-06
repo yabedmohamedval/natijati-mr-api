@@ -514,7 +514,7 @@ public class PublicReadRepository {
         if (hasText(query)) {
             List<String> filters = new ArrayList<>();
             if (nameFrColumn != null) filters.add("LOWER(COALESCE(br." + nameFrColumn + ", '')) LIKE :query");
-            if (nameArColumn != null) filters.add("COALESCE(br." + nameArColumn + ", '') LIKE :query");
+            if (nameArColumn != null) filters.add("LOWER(COALESCE(br." + nameArColumn + ", '')) LIKE :query");
             base.append(" AND (").append(String.join(" OR ", filters)).append(")");
             params.addValue("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
         }

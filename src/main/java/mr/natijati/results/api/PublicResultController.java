@@ -37,7 +37,6 @@ public class PublicResultController {
         @PathVariable Long candidateNumber,
         @RequestParam(defaultValue = "NORMAL") SessionType sessionType
     ) {
-        log.info("requesting the note of student {}", candidateNumber);
         BacResult result = bacResultRepository
             .findByExamSession_ExamTypeAndExamSession_YearAndExamSession_SessionTypeAndExamSession_StatusAndCandidateNumber(
                 ExamType.BAC,
