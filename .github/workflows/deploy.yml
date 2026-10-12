@@ -1,0 +1,88 @@
+name: Backend production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      REGISTRY_REPOSITORY: natijati-repo
+      SERVICE: natijati-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate deployment destination
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          DEPLOY_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = natijati-mr
+          test "$GCP_REGION" = europe-west1
+          test -n "$WIF_PROVIDER"
+          [[ "$DEPLOY_ACCOUNT" == *@natijati-mr.iam.gserviceaccount.com ]]
+          echo "IMAGE=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$REGISTRY_REPOSITORY/$SERVICE" >> "$GITHUB_ENV"
+      - name: Build before requesting credentials
+        run: docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$IMAGE:$GITHUB_SHA" .
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+          create_credentials_file: false
+      - name: Verify existing service and secret mappings
+        env:
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --format=json > "$RUNNER_TEMP/service-before.json"
+          python3 .github/scripts/check-service.py "$RUNNER_TEMP/service-before.json"
+      - name: Push image and capture immutable digest
+        env:
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$CLOUDSDK_AUTH_ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$GCP_REGION-docker.pkg.dev"
+          docker push "$IMAGE:$GITHUB_SHA"
+          DIGEST=$(gcloud artifacts docker images describe "$IMAGE:$GITHUB_SHA" --project="$GCP_PROJECT_ID" --format='value(image_summary.digest)')
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "DEPLOY_IMAGE=$IMAGE@$DIGEST" >> "$GITHUB_ENV"
+      - name: Update existing service image and route traffic
+        env:
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          gcloud run services update "$SERVICE" --image="$DEPLOY_IMAGE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --quiet
+          gcloud run services update-traffic "$SERVICE" --to-latest --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --quiet
+          gcloud run services describe "$SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --format=json > "$RUNNER_TEMP/service-after.json"
+          python3 .github/scripts/check-service.py "$RUNNER_TEMP/service-after.json" "$RUNNER_TEMP/service-before.json"
+      - name: Public smoke tests (no candidate data)
+        run: bash .github/scripts/smoke.sh "$SERVICE_URL"
