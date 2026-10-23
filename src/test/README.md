@@ -24,7 +24,8 @@ et Flyway, indépendamment de `DB_URL`.
 Le profil `integration` est forcé ; `application-local` n’est pas chargé. Les
 propriétés de test imposent une URL datasource inutilisable en secours, des
 identifiants synthétiques et aucune URL Flyway distincte. Les tests contrôlent la
-connexion obtenue. Aucun secret local, Supabase, Cloud Run ou fichier officiel.
+connexion obtenue. Aucun secret local, Supabase ou Cloud Run. Les suites standard
+n'utilisent aucun fichier officiel ; le contrôle opt-in ci-dessous exige des chemins explicites.
 
 Flyway applique les migrations réelles ; Hibernate utilise `validate`. Spring Batch
 initialise ses tables, mais aucun job n’est lancé automatiquement au démarrage.
@@ -37,6 +38,7 @@ Les tests d’import déclenchent ensuite explicitement leurs jobs synthétiques
 | `*Test` | Services/contrôleurs ciblés et validation Excel avec petits fichiers POI |
 | `BackendIT` | Contexte Spring, Flyway, mappings, contraintes/index, JPA/SQL, catalogue, REST, erreurs, Security, CORS, JobRepository, binding Hikari et politique Actuator |
 | `ImportIT` | Imports BAC/BEPC/C1AS, fichiers invalides, idempotence, sessions, concurrence de réservation, commits/nettoyage, publication, fichiers temporaires |
+| `OfficialFormatTest` | Headers officiels, 5 artefacts C1AS, scores BEPC, 6 décisions, zéros source, 121 140 lignes et limite configurable |
 
 `BackendIT` utilise des fixtures transactionnelles annulées après chaque test et
 des savepoints pour les contraintes. MockMvc exécute MVC et les filtres sans serveur
@@ -62,6 +64,37 @@ import, débit, taille et indicateur heap. `ImportAtomicityCheck` injecte une er
 après 40 000 écritures commitées sur 65 000, puis vérifie zéro résultat conservé,
 FAILED, publication interdite, nettoyage et nouvelle tentative réussie.
 Voir [la politique d’import](../../docs/IMPORTS.md) pour les limites de ces mesures.
+
+## Fichiers officiels locaux, contrôle explicite
+
+```sh
+mvn -B -Dit.test=OfficialFilesCheck \
+  -Dimport.official.c1as=../RESU_C1AS_2026_15_07-2026_121140.xlsx \
+  -Dimport.official.bepc=../Res_Global_.Bepc_15-07-2026_75694.xlsx \
+  -DargLine=-Xmx640m verify
+```
+
+Ce contrôle est exclu de `verify` par défaut. Il échoue si un chemin manque.
+Les fichiers restent hors git, en lecture seule ; les validations utilisent des
+copies temporaires. SHA-256 avant/après confirme que les originaux ne changent pas.
+Le datasource JDBC doit être exactement celui du PostgreSQL Testcontainers.
+Flyway V1+V2 et Hibernate validate sont exécutés. Aucune publication des résultats
+officiels : vérification de READY, du compte réel et de published_at NULL.
+
+Les 196 834 lignes sont comparées une par une : identifiants numériques et texte
+source, noms, territoires, centres, autres champs métier, décisions et notes.
+Les assertions textuelles n'affichent pas les valeurs personnelles en cas d'échec.
+La comparaison PostgreSQL utilise un curseur par lots de 500 ; le reader reste SAX.
+Les fichiers upload/spool/copie doivent disparaître. Les compteurs, durées séparées
+du preflight et du Batch, débit et indicateur heap sont écrits dans
+`target/official-audit/{c1as,bepc}-import.json` sans identité personnelle.
+Les six notes BEPC déterministes sont comparées au XML brut, pas à une valeur
+tronquée à neuf décimales.
+
+`ImportIT` vérifie aussi la précision BEPC sur des fixtures synthétiques via JPA,
+JSON, recherche et statistiques. `BackendIT` vérifie la migration V1 → V2 avec
+une note préexistante dans un schéma distinct du conteneur. Les données historiques
+restent inchangées ; leurs identifiants source restent NULL.
 
 ## Limites
 

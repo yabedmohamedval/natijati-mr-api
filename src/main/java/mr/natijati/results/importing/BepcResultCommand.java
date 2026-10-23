@@ -12,6 +12,7 @@ public record BepcResultCommand(
     String examCenterFr,
     BigDecimal score,
     DecisionCode decisionCode,
-    String decisionOriginal
+    String decisionOriginal,
+    String candidateNumberOriginal
 ) implements ExamResultCommand {
 }

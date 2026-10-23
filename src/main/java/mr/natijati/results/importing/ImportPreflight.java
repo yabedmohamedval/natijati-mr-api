@@ -11,7 +11,7 @@ import java.util.Set;
 @Service
 public class ImportPreflight {
     private final int maxRows;
-    public ImportPreflight(@Value("${app.import-max-rows:100000}") int maxRows) { this.maxRows = maxRows; }
+    public ImportPreflight(@Value("${app.import-max-rows}") int maxRows) { this.maxRows = maxRows; }
 
     /** No database writes: reject the complete file before reserving a session. */
     public long validate(Path file, ExamType exam) { return inspect(file, exam).rows(); }

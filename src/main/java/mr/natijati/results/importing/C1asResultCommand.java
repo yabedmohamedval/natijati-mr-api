@@ -11,6 +11,8 @@ public record C1asResultCommand(
     String wilayaAr,
     String moughataaAr,
     String examCenterAr,
-    BigDecimal totalScore
+    BigDecimal totalScore,
+    String candidateNumberOriginal,
+    String dossierNumberOriginal
 ) implements ExamResultCommand {
 }

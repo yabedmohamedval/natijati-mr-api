@@ -29,10 +29,18 @@ class ImportValidationTest {
     @Test void xlsAndNumericCellPrecisionRemainSupported() throws Exception {
         Path file=workbook(true,b->b.getSheetAt(0).getRow(1).getCell(2).setCellStyle(style(b,"0.0")));
         assertThat(new ImportPreflight(100).validate(file,ExamType.BAC)).isEqualTo(1);
-        var reader=new ExcelResultItemReader(file,ExamType.BAC);
+        var reader=new ExcelResultItemReader(file,ExamType.BAC,100);
         try { reader.open(new org.springframework.batch.item.ExecutionContext());assertThat(reader.read().values().get("MOY_BAC")).isEqualTo("12.345"); } finally{reader.close();}
     }
     private CellStyle style(Workbook b,String format) {var s=b.createCellStyle();s.setDataFormat(b.createDataFormat().getFormat(format));return s;}
+    @Test void legacyBatchReaderAlsoEnforcesConfiguredLimit() throws Exception {
+        Path file=workbook(true,b->{});
+        var reader=new ExcelResultItemReader(file,ExamType.BAC,0);
+        try {
+            reader.open(new org.springframework.batch.item.ExecutionContext());
+            assertThatThrownBy(reader::read).hasMessageContaining("Limite");
+        } finally {reader.close();}
+    }
     @Test void missingAndDuplicateHeadersAreRejected() throws Exception {
         Path missing=workbook(false,b->b.getSheetAt(0).getRow(0).getCell(2).setCellValue("other"));
         assertThatThrownBy(()->new ImportPreflight(100).validate(missing,ExamType.BAC)).isInstanceOf(InvalidExamRowException.class).hasMessageContaining("HEADERS");

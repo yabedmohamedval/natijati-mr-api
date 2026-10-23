@@ -24,6 +24,12 @@ public class C1asResult {
     @Column(name = "dossier_number", nullable = false)
     private Long dossierNumber;
 
+    @Column(name = "candidate_number_original")
+    private String candidateNumberOriginal;
+
+    @Column(name = "dossier_number_original")
+    private String dossierNumberOriginal;
+
     @Column(name = "name_ar", nullable = false)
     private String nameAr;
 
@@ -53,6 +59,8 @@ public class C1asResult {
         result.examSession = session;
         result.candidateNumber = command.candidateNumber();
         result.dossierNumber = command.dossierNumber();
+        result.candidateNumberOriginal = command.candidateNumberOriginal();
+        result.dossierNumberOriginal = command.dossierNumberOriginal();
         result.nameAr = command.nameAr();
         result.candidateType = command.candidateType();
         result.schoolAr = command.schoolAr();
@@ -65,6 +73,8 @@ public class C1asResult {
 
     public Long getCandidateNumber() { return candidateNumber; }
     public Long getDossierNumber() { return dossierNumber; }
+    public String getCandidateNumberOriginal() { return candidateNumberOriginal; }
+    public String getDossierNumberOriginal() { return dossierNumberOriginal; }
     public String getNameAr() { return nameAr; }
     public String getCandidateType() { return candidateType; }
     public String getSchoolAr() { return schoolAr; }

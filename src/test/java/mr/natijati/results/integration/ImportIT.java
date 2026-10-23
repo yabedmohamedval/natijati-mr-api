@@ -20,6 +20,46 @@ class ImportIT extends ImportIntegrationSupport {
     @Autowired JobLauncher launcher;
     @Autowired Job examResultImportJob;
 
+    @Test void officialBepcPrecisionSurvivesJpaSearchJsonAndStatistics() throws Exception {
+        String[] scores = {"4.2631578947368398", "5.8421052631578902", "9.7631578947368407", "9.9473684210526301", "10.1", "0"};
+        String[] decisions = {"Ajourné", "Admis", "Absent", "Examen annulé -Telephone", "Examen-Annulé-Telephone", "Eliminé"};
+        byte[] fixture;
+        try (var book = new org.apache.poi.xssf.usermodel.XSSFWorkbook(); var output = new java.io.ByteArrayOutputStream()) {
+            var sheet = book.createSheet(); var header = sheet.createRow(0);
+            String[] headers = {"Numéro","NOM","DATE NISS","LIEU NAISS","Code Wilaya","Wilaya","Centre","Moyg","Decision"};
+            for (int c=0;c<headers.length;c++) header.createCell(c).setCellValue(headers[c]);
+            for (int i=0;i<scores.length;i++) {
+                var row = sheet.createRow(i+1);
+                String[] values = {String.format(java.util.Locale.ROOT,"%05d",296+i),"Synthetic","ignored","ignored","08","Synthetic wilaya","Synthetic centre",scores[i],decisions[i]};
+                for (int c=0;c<values.length;c++) row.createCell(c).setCellValue(values[c]);
+                row.getCell(7).setCellValue(Double.parseDouble(scores[i])); row.getCell(7).getCTCell().setV(scores[i]);
+            }
+            book.write(output); fixture = output.toByteArray();
+        }
+        var report = upload(ExamType.BEPC,SessionType.NORMAL,fixture);
+        assertThat(report.batchStatus()).isEqualTo("COMPLETED");
+        assertThat(report.ignoredColumns()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT candidate_number_original FROM bepc_result WHERE candidate_number=296",String.class)).isEqualTo("00296");
+        sessions.publish(report.sessionId()); // synthetic data only
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+        for (int i=0;i<scores.length;i++) {
+            String id = String.format(java.util.Locale.ROOT,"%05d",296+i);
+            var result = mvc.perform(get("/api/public/results/bepc/2026/"+id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisionLabel").value(decisions[i])).andReturn().getResponse();
+            assertThat(json.readTree(result.getContentAsString()).get("score").decimalValue()).isEqualByComparingTo(scores[i]);
+            var search = mvc.perform(get("/api/public/catalog/search").param("examType","BEPC").param("year","2026").param("candidateNumber",id))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1)).andReturn().getResponse();
+            assertThat(json.readTree(search.getContentAsString()).at("/content/0/score").decimalValue()).isEqualByComparingTo(scores[i]);
+        }
+        var statistics = mvc.perform(get("/api/public/catalog/statistics/BEPC/2026"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.candidateCount").value(6))
+            .andExpect(jsonPath("$.admittedCount").value(1)).andExpect(jsonPath("$.cancelledCount").value(2))
+            .andReturn().getResponse();
+        assertThat(json.readTree(statistics.getContentAsString()).get("averageScore").decimalValue())
+            .isEqualByComparingTo(jdbc.queryForObject("SELECT avg(score) FROM bepc_result",java.math.BigDecimal.class));
+        noTemporaryFiles();
+    }
+
     @ParameterizedTest @EnumSource(ExamType.class)
     void validExcelIsReadyAndPublishedOnlyExplicitly(ExamType exam) throws Exception {
         var report=upload(exam,SessionType.NORMAL,excel(exam,2,false,false));

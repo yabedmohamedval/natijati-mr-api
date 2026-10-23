@@ -246,7 +246,10 @@ public class PublicReadRepository {
 
         if (hasText(c.candidateNumber())) {
             sql.append(" AND ").append(candidateColumn).append("::text = :candidateNumber");
-            params.addValue("candidateNumber", c.candidateNumber().trim());
+            String identifier = c.candidateNumber().trim();
+            // Official identifiers are padded text; the lookup key is numeric.
+            if (identifier.matches("[0-9]+")) identifier = identifier.replaceFirst("^0+(?!$)", "");
+            params.addValue("candidateNumber", identifier);
         }
 
         appendTextFilter(sql, params, "name", c.name(), nameFrColumn, nameArColumn);
@@ -689,6 +692,8 @@ public class PublicReadRepository {
             case "FAILED" -> "Ajourné";
             case "SECOND_SESSION" -> "Sessionnaire";
             case "CANCELLED" -> "Annulation de l'examen";
+            case "ABSENT" -> "Absent";
+            case "ELIMINATED" -> "Éliminé";
             default -> "Non renseigné";
         };
     }
@@ -699,6 +704,8 @@ public class PublicReadRepository {
             case "FAILED" -> "غير ناجح";
             case "SECOND_SESSION" -> "الدورة التكميلية";
             case "CANCELLED" -> "إلغاء الامتحان";
+            case "ABSENT" -> "غائب";
+            case "ELIMINATED" -> "مقصى";
             default -> "غير محدد";
         };
     }

@@ -5,6 +5,7 @@ public enum DecisionCode {
     FAILED,
     SECOND_SESSION,
     CANCELLED,
+    ELIMINATED,
     ABSENT,
     UNKNOWN
 }

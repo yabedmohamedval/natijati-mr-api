@@ -35,6 +35,13 @@ public final class DecisionNormalizer {
         if ((value.equals("ABSENT") || value.equals("ABSENTE"))) {
             return DecisionCode.ABSENT;
         }
+        // Exact aliases observed in the official BEPC 2026 file; no fuzzy match.
+        if (value.equals("EXAMEN ANNULE -TELEPHONE") || value.equals("EXAMEN-ANNULE-TELEPHONE")) {
+            return DecisionCode.CANCELLED;
+        }
+        if (value.equals("ELIMINE")) {
+            return DecisionCode.ELIMINATED;
+        }
 
         return DecisionCode.UNKNOWN;
     }

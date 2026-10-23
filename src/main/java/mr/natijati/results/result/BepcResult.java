@@ -22,6 +22,9 @@ public class BepcResult {
     @Column(name = "candidate_number", nullable = false)
     private Long candidateNumber;
 
+    @Column(name = "candidate_number_original")
+    private String candidateNumberOriginal;
+
     @Column(name = "name_fr", nullable = false)
     private String nameFr;
 
@@ -34,7 +37,7 @@ public class BepcResult {
     @Column(name = "exam_center_fr")
     private String examCenterFr;
 
-    @Column(precision = 18, scale = 12)
+    @Column(precision = 24, scale = 18)
     private BigDecimal score;
 
     @Enumerated(EnumType.STRING)
@@ -51,6 +54,7 @@ public class BepcResult {
         BepcResult result = new BepcResult();
         result.examSession = session;
         result.candidateNumber = command.candidateNumber();
+        result.candidateNumberOriginal = command.candidateNumberOriginal();
         result.nameFr = command.nameFr();
         result.wilayaCode = command.wilayaCode();
         result.wilayaFr = command.wilayaFr();
@@ -62,6 +66,7 @@ public class BepcResult {
     }
 
     public Long getCandidateNumber() { return candidateNumber; }
+    public String getCandidateNumberOriginal() { return candidateNumberOriginal; }
     public String getNameFr() { return nameFr; }
     public Integer getWilayaCode() { return wilayaCode; }
     public String getWilayaFr() { return wilayaFr; }

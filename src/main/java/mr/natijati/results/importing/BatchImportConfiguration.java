@@ -30,7 +30,7 @@ public class BatchImportConfiguration {
     public ItemStreamReader<RawExamRow> excelResultItemReader(
         @Value("#{jobParameters['filePath']}") String filePath,
         @Value("#{jobParameters['examType']}") String examType,
-        @Value("${app.import-max-rows:100000}") int maxRows
+        @Value("${app.import-max-rows}") int maxRows
     ) {
         return new ExcelResultItemReader(
             Path.of(filePath),

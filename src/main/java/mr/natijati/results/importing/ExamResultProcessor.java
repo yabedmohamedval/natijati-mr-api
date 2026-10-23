@@ -5,6 +5,7 @@ import mr.natijati.results.exam.ExamType;
 import org.springframework.batch.item.ItemProcessor;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Map;
 
 public class ExamResultProcessor
@@ -58,7 +59,8 @@ public class ExamResultProcessor
             value(row, "CENTRE"),
             score(row, "MOYG", decision),
             decision(row, decision),
-            decision
+            decision,
+            value(row, "NUMERO")
         );
     }
 
@@ -72,7 +74,9 @@ public class ExamResultProcessor
             value(row, "WILAYA_AR"),
             value(row, "MOUGHATAA_AR"),
             value(row, "CENTRE_EXAMEN_AR"),
-            score(row, "TOTAL", null)
+            score(row, "TOTAL", null),
+            value(row, "NUMERO_C1AS"),
+            value(row, "NODOSS")
         );
     }
 
@@ -128,9 +132,22 @@ public class ExamResultProcessor
             BigDecimal score = decimal(text).stripTrailingZeros();
             if (score.signum() < 0 || (examType != ExamType.C1AS && score.compareTo(BigDecimal.valueOf(20)) > 0))
                 throw invalid(row, key, "Score hors plage");
-            // NUMERIC(18,12): no silent rounding or overflow. C1AS has no assumed academic ceiling.
-            if (score.scale() > 12 || (long) score.precision() - score.scale() > 6)
-                throw invalid(row, key, "Score incompatible avec NUMERIC(18,12)");
+            // BEPC's official XML contains genuine precision beyond 12 decimals.
+            int scale = examType == ExamType.BEPC ? 18 : 12;
+            if ((long) score.precision() - score.scale() > 6)
+                throw invalid(row, key, "Score incompatible avec NUMERIC(" + (scale + 6) + "," + scale + ")");
+            if (score.scale() > scale) {
+                BigDecimal stored = score.setScale(scale, RoundingMode.HALF_EVEN).stripTrailingZeros();
+                // At most half a binary64 ULP, capped at 1e-14 score points.
+                // Only the scores use this tolerance; identifiers remain exact integers.
+                BigDecimal tolerance = BigDecimal.valueOf(Math.ulp(score.doubleValue()))
+                    .divide(BigDecimal.valueOf(2)).min(new BigDecimal("1E-14"));
+                if ((stored.signum() == 0 && score.signum() != 0) || score.subtract(stored).abs().compareTo(tolerance) > 0)
+                    throw invalid(row, key, "Score incompatible avec NUMERIC(" + (scale + 6) + "," + scale + ")");
+                score = stored;
+            }
+            if ((long) score.precision() - score.scale() > 6)
+                throw invalid(row, key, "Score incompatible avec NUMERIC(" + (scale + 6) + "," + scale + ")");
             return score;
         } catch (NumberFormatException ex) {
             throw invalid(row, key, "Score numérique invalide");

@@ -25,10 +25,7 @@ public class ExcelResultItemReader implements ItemStreamReader<RawExamRow> {
     private Sheet sheet;
     private Map<Integer, String> headers;
     private int currentRowIndex;
-
-    public ExcelResultItemReader(Path filePath, ExamType examType) {
-        this(filePath, examType, 100000);
-    }
+    private int dataRows;
 
     public ExcelResultItemReader(Path filePath, ExamType examType, int maxRows) {
         this.filePath = filePath;
@@ -39,6 +36,7 @@ public class ExcelResultItemReader implements ItemStreamReader<RawExamRow> {
     @Override
     public void open(ExecutionContext executionContext) {
         try {
+            dataRows = 0;
             if (org.apache.poi.poifs.filesystem.FileMagic.valueOf(filePath.toFile()) == org.apache.poi.poifs.filesystem.FileMagic.OOXML) {
                 spool = XlsxRowSpool.create(filePath, examType, maxRows);
                 rows = new java.io.DataInputStream(new java.io.BufferedInputStream(java.nio.file.Files.newInputStream(spool)));
@@ -91,6 +89,7 @@ public class ExcelResultItemReader implements ItemStreamReader<RawExamRow> {
             if (row == null || isEmpty(row)) {
                 continue;
             }
+            if (++dataRows > maxRows) throw invalid(row.getRowNum() + 1, "ROWS", "Limite de lignes dépassée : " + maxRows);
 
             Map<String, String> values = new LinkedHashMap<>();
             headers.forEach((columnIndex, header) -> {
@@ -199,10 +198,18 @@ public class ExcelResultItemReader implements ItemStreamReader<RawExamRow> {
         if (cell == null) {
             return "";
         }
-        if (cell.getCellType() == CellType.FORMULA || cell.getCellType() == CellType.ERROR)
-            throw invalid(cell.getRowIndex()+1, "CELL_" + (cell.getColumnIndex()+1), "Formule ou cellule en erreur interdite");
-        if (cell.getCellType() == CellType.NUMERIC)
+
+        if (cell.getCellType() == CellType.FORMULA || cell.getCellType() == CellType.ERROR) {
+            throw invalid(
+                cell.getRowIndex() + 1,
+                "CELL_" + (cell.getColumnIndex() + 1),
+                "Formule ou cellule en erreur interdite"
+            );
+        }
+
+        if (cell.getCellType() == CellType.NUMERIC) {
             return org.apache.poi.ss.util.NumberToTextConverter.toText(cell.getNumericCellValue());
+        }
         return formatter.formatCellValue(cell).trim();
     }
 

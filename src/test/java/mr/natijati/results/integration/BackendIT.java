@@ -203,7 +203,7 @@ class BackendIT {
         }
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(flyway.info().pending()).isEmpty();
-        assertThat(Arrays.stream(flyway.info().applied()).map(m -> m.getVersion().toString())).contains("1");
+        assertThat(Arrays.stream(flyway.info().applied()).map(m -> m.getVersion().toString())).contains("1", "2");
         var tables = jdbc.queryForList("SELECT tablename FROM pg_tables WHERE schemaname='public'", String.class);
         assertThat(tables).contains("flyway_schema_history", "exam_session", "bac_result", "bepc_result", "c1as_result",
             "batch_job_instance", "batch_job_execution", "batch_job_execution_params", "batch_step_execution",
@@ -216,6 +216,28 @@ class BackendIT {
         assertThat(examResultImportJob.getName()).isEqualTo("examResultImportJob");
         assertThat(jobs.isJobInstanceExists("examResultImportJob", new JobParameters())).isFalse();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM batch_job_execution", Integer.class)).isZero();
+    }
+
+    @Test void v2UpgradePreservesExistingV1ScoresAndNumericIdentifiers() throws Exception {
+        // Independent schema in this Testcontainer: exercise an upgrade, not just a clean install.
+        String schema = "official_upgrade_test";
+        var migrationDatasource = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+            postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            connection.setAutoCommit(true);
+            try {
+                Flyway.configure().dataSource(migrationDatasource).schemas(schema).defaultSchema(schema).target("1").load().migrate();
+                statement.execute("INSERT INTO " + schema + ".exam_session(id,exam_type,exam_year,session_type,status) VALUES(1,'BEPC',2025,'NORMAL','READY')");
+                statement.execute("INSERT INTO " + schema + ".bepc_result(exam_session_id,candidate_number,name_fr,score) VALUES(1,296,'Synthetic',4.263157895123)");
+                Flyway.configure().dataSource(migrationDatasource).schemas(schema).defaultSchema(schema).load().migrate();
+                try (var result = statement.executeQuery("SELECT candidate_number,score,candidate_number_original FROM " + schema + ".bepc_result")) {
+                    assertThat(result.next()).isTrue();
+                    assertThat(result.getLong(1)).isEqualTo(296);
+                    assertThat(result.getBigDecimal(2)).isEqualByComparingTo("4.263157895123");
+                    assertThat(result.getString(3)).isNull();
+                }
+            } finally { statement.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE"); }
+        }
     }
 
     @ParameterizedTest
@@ -299,6 +321,8 @@ class BackendIT {
             .andExpect(jsonPath("$.content.length()").value(1)).andExpect(jsonPath("$.content[0].identifier").value("10002"));
         mvc.perform(get("/api/public/catalog/search").param("examType",exam).param("year","2025").param("candidateNumber","10001")
             .param("name","synthetic").param("institution","school").param("wilaya","region"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));
+        mvc.perform(get("/api/public/catalog/search").param("examType",exam).param("year","2025").param("candidateNumber","00010001"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));
         catalog("search",exam,2024,"NORMAL").andExpect(jsonPath("$.content[0].score").value(9));
         catalog("search",exam,2024,"COMPLEMENTARY").andExpect(jsonPath("$.totalElements").value(0));

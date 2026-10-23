@@ -89,3 +89,4 @@ app:
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD}
+  import-max-rows: ${APP_IMPORT_MAX_ROWS:150000}
