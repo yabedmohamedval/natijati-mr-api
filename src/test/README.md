@@ -11,7 +11,7 @@ mvn -B verify
 ```
 
 `test` lance les `*Test` unitaires/ciblés sans conteneur. `verify` ajoute les `*IT`
-via Maven Failsafe, actuellement `BackendIT` et `ImportIT`. Une absence de Docker
+via Maven Failsafe, actuellement `BackendIT`, `ImportIT` et `AsyncImportIT`. Une absence de Docker
 fait échouer les intégrations : ni skip silencieux ni fallback vers une base externe.
 Les rapports de référence sont dans `target/surefire-reports` et `target/failsafe-reports`.
 
@@ -78,7 +78,7 @@ Ce contrôle est exclu de `verify` par défaut. Il échoue si un chemin manque.
 Les fichiers restent hors git, en lecture seule ; les validations utilisent des
 copies temporaires. SHA-256 avant/après confirme que les originaux ne changent pas.
 Le datasource JDBC doit être exactement celui du PostgreSQL Testcontainers.
-Flyway V1+V2 et Hibernate validate sont exécutés. Aucune publication des résultats
+Flyway V1+V2+V3 et Hibernate validate sont exécutés. Aucune publication des résultats
 officiels : vérification de READY, du compte réel et de published_at NULL.
 
 Les 196 834 lignes sont comparées une par une : identifiants numériques et texte
@@ -92,14 +92,14 @@ Les six notes BEPC déterministes sont comparées au XML brut, pas à une valeur
 tronquée à neuf décimales.
 
 `ImportIT` vérifie aussi la précision BEPC sur des fixtures synthétiques via JPA,
-JSON, recherche et statistiques. `BackendIT` vérifie la migration V1 → V2 avec
+JSON, recherche et statistiques. `BackendIT` vérifie la migration V1 → V2 → V3 avec
 une note préexistante dans un schéma distinct du conteneur. Les données historiques
 restent inchangées ; leurs identifiants source restent NULL.
 
 ## Limites
 
-Ces tests ne simulent pas l’arrêt brutal de Cloud Run, le réseau Supabase ou une
-charge nationale. Ils ne constituent pas un benchmark distribué ni une qualification
+Le test P4-C tue réellement une JVM worker après quatre commits. Il ne reproduit
+pas le plan de contrôle Cloud Run, le réseau Supabase ou une charge nationale. Ils ne constituent pas un benchmark distribué ni une qualification
 500k lignes. Pas de couverture JaCoCo ajoutée ; privilégier des assertions utiles
 sur la sécurité, les sessions, le schéma et les effets transactionnels.
 
@@ -122,3 +122,32 @@ n’est envoyé. Ce test ne simule pas une latence réseau ou une panne Supabase
 réelles, sans datasource ni variables système/locales. Il vérifie que l’absence
 d’ADMIN_PASSWORD empêche le démarrage et qu’une valeur synthétique explicite crée
 un administrateur dont le mot de passe est encodé.
+
+## Imports asynchrones P4-C
+
+`AsyncAdaptersTest` vérifie le filesystem durable, les clés UUID, le dispatch REST
+avec seulement l’importId, les erreurs masquées, l’indisponibilité du stockage et
+le calcul décimal de progression, sans ADC/GCP réels.
+
+`AsyncImportIT` vérifie POST 202, statut/liste ADMIN, réservation QUEUED, preflight
+différé, absence de session sur fichier invalide, READY/FAILED, nettoyage,
+idempotence, exclusion DB entre workers, dispatch incertain, source absente,
+fencing et rollback du compteur. Le scénario 5 000 lignes lance
+`CrashImportWorkerProcess`, une JVM sans environnement hérité, avec uniquement
+l’URL/credentials du Testcontainer et les chemins temporaires. `Runtime.halt(137)`
+après le quatrième commit laisse 2 000 résultats, une session IMPORTING et Batch
+STARTED. Le test vérifie publication refusée puis redémarrage depuis zéro,
+ancien Batch ABANDONED et exactement 5 000 identifiants distincts en READY.
+Le log enfant est dans `target/crashed-worker.log`, avec fixtures synthétiques.
+
+Le harnais historique `upload()` garde ses assertions synchrones de validation,
+puis soumet et exécute le vrai worker. Cette prévalidation supplémentaire est
+exclusivement un adaptateur de tests historiques, absent du contrôleur HTTP.
+`OfficialFilesCheck` reste manuel et n’a pas été exécuté pendant P4-C.
+
+Le guide [ASYNC_IMPORTS.md](../../docs/ASYNC_IMPORTS.md) décrit les prérequis réels
+GCS/Cloud Run et les limites non couvertes par ces tests locaux.
+
+Validation P4-C du 24 octobre 2026 : `mvn -B test` réussit avec 116 tests ;
+`mvn -B verify` réussit avec ces 116 tests et 90 intégrations (206 au total),
+0 échec, 0 erreur, 0 ignoré. `git diff --check` réussit également.

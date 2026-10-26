@@ -30,15 +30,21 @@ import static org.assertj.core.api.Assertions.assertThat;
     "spring.flyway.url=", "spring.flyway.user=", "spring.flyway.password=",
     "app.admin.username=integration-admin", "app.admin.password=synthetic-test-password"
 })
+@org.springframework.context.annotation.Import(AsyncImportTestConfiguration.class)
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 abstract class ImportIntegrationSupport {
     @Container @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17.11-alpine");
     static final Path directory;
-    static { try { directory = Files.createTempDirectory("natijati-import-tests-"); } catch (Exception e) { throw new ExceptionInInitializerError(e); } }
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) { registry.add("app.import-directory", directory::toString); }
+    static final Path objectDirectory;
+    static { try { directory = Files.createTempDirectory("natijati-import-tests-"); objectDirectory=Files.createTempDirectory("natijati-objects-tests-"); } catch (Exception e) { throw new ExceptionInInitializerError(e); } }
+    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) { registry.add("app.import-directory", directory::toString); registry.add("test.object-directory",objectDirectory::toString); }
     @Autowired ImportController imports;
+    @Autowired mr.natijati.results.importing.async.ImportWorker worker;
+    @Autowired mr.natijati.results.importing.async.ImportExecutionRepository executions;
+    @Autowired ImportPreflight preflight;
+    @Autowired ImportStorageService staging;
     @Autowired ExamSessionService sessions;
     @Autowired JdbcTemplate jdbc;
     @Autowired DataSource datasource;
@@ -46,6 +52,7 @@ abstract class ImportIntegrationSupport {
 
     @BeforeEach void cleanSyntheticDatabase() throws Exception {
         try (var connection=datasource.getConnection()) { assertThat(connection.getMetaData().getURL()).isEqualTo(postgres.getJdbcUrl()); }
+        jdbc.update("DELETE FROM import_execution");
         jdbc.update("DELETE FROM exam_session"); // isolated container, FK cascade, real commits
     }
 
@@ -79,7 +86,18 @@ abstract class ImportIntegrationSupport {
         }
     }
     ImportJobResponse upload(ExamType exam, SessionType session, byte[] content) throws Exception {
-        return imports.importResults(new MockMultipartFile("file","synthetic.xlsx","application/octet-stream",content),exam,2026,session);
+        // Legacy engine assertions remain synchronous in this TEST harness only.
+        // AsyncImportIT separately exercises submission without preflight and the real worker.
+        var multipart=new MockMultipartFile("file","synthetic.xlsx","application/octet-stream",content);
+        var local=staging.store(multipart);
+        try { preflight.inspect(local,exam); } finally { staging.delete(local); }
+        var accepted=imports.importResults(multipart,exam,2026,session).getBody();
+        worker.run(accepted.importId(),"synthetic-worker");
+        var e=executions.get(accepted.importId());
+        var business=sessions.getRequired(e.sessionId());
+        return new ImportJobResponse(e.sessionId(),e.batchJobExecutionId(),e.status()==mr.natijati.results.importing.async.ImportStatus.READY ? "COMPLETED" : "FAILED",
+            business.getStatus().name(),business.getResultCount(),e.readRows(),e.rejectedRows(),e.durationMs(),
+            e.errorCode()==null ? java.util.List.of() : java.util.List.of(new ImportIssue(exam.name(),0,"BATCH","[masquée]",e.errorSummary())),e.ignoredColumns());
     }
     void noTemporaryFiles() throws Exception { try(var files=Files.list(directory)) { assertThat(files.toList()).isEmpty(); } }
 }

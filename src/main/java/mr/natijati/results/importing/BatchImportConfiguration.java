@@ -1,5 +1,6 @@
 package mr.natijati.results.importing;
 
+import mr.natijati.results.importing.async.*;
 import mr.natijati.results.exam.ExamSessionRepository;
 import mr.natijati.results.exam.ExamSessionService;
 import mr.natijati.results.exam.ExamType;
@@ -53,15 +54,22 @@ public class BatchImportConfiguration {
         ExamSessionRepository sessionRepository,
         BacResultRepository bacResultRepository,
         BepcResultRepository bepcResultRepository,
-        C1asResultRepository c1asResultRepository
+        C1asResultRepository c1asResultRepository,
+        ImportExecutionRepository executions,
+        @Value("#{jobParameters['importId']}") String importId,
+        @Value("#{jobParameters['importAttempt']}") Long importAttempt
     ) {
-        return new ExamResultWriter(
+        var writer = new ExamResultWriter(
             sessionId,
             sessionRepository,
             bacResultRepository,
             bepcResultRepository,
             c1asResultRepository
         );
+        return chunk -> {
+            writer.write(chunk);
+            if (importId != null) executions.progress(java.util.UUID.fromString(importId), importAttempt.intValue(), chunk.size());
+        };
     }
 
     @Bean
@@ -70,13 +78,15 @@ public class BatchImportConfiguration {
         PlatformTransactionManager transactionManager,
         ItemStreamReader<RawExamRow> excelResultItemReader,
         ItemProcessor<RawExamRow, ExamResultCommand> examResultProcessor,
-        ItemWriter<ExamResultCommand> examResultWriter
+        ItemWriter<ExamResultCommand> examResultWriter,
+        ImportExecutionRepository executions
     ) {
         return new StepBuilder("importExamResultsStep", jobRepository)
             .<RawExamRow, ExamResultCommand>chunk(500, transactionManager)
             .reader(excelResultItemReader)
             .processor(examResultProcessor)
             .writer(examResultWriter)
+            .listener(new ImportProgressListener(executions))
             .build();
     }
 
@@ -84,11 +94,12 @@ public class BatchImportConfiguration {
     public Job examResultImportJob(
         JobRepository jobRepository,
         Step importExamResultsStep,
-        ExamSessionService sessionService
+        ExamSessionService sessionService,
+        ImportWorkerTransactions transactions
     ) {
         return new JobBuilder("examResultImportJob", jobRepository)
             .preventRestart()
-            .listener(new ImportJobListener(sessionService))
+            .listener(new ImportJobListener(sessionService, transactions))
             .start(importExamResultsStep)
             .build();
     }

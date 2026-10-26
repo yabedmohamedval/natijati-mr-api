@@ -2,28 +2,27 @@
 
 ## Flux et contrat
 
-POST /api/admin/imports reste synchrone et authentifié. Un seul upload est traité à
-la fois par JVM (les autres appels sont refusés et peuvent être retentés).
+Depuis P4-C, `POST /api/admin/imports` est **asynchrone** et retourne HTTP 202.
+Le contrat complet, le schéma V3 et les commandes d’infrastructure préparées sont
+dans [ASYNC_IMPORTS.md](ASYNC_IMPORTS.md).
 
-1. Contrôle de l'année (1900–2100), de la taille et du format réel.
-2. Copie dans un fichier généré, sans réutiliser le nom fourni par le client.
-3. Prévalidation de toutes les lignes, sans écriture métier. Premier défaut bloquant.
-4. Réservation transactionnelle du triplet examen/année/session : verrou PostgreSQL
-   `pg_try_advisory_xact_lock`, puis statut IMPORTING avant le lancement du job.
-5. Batch par chunks de 500. Les résultats restent invisibles aux endpoints publics.
-6. COMPLETED et résultat non vide : READY ; publication explicite par l'administrateur.
-7. Échec traité : suppression SQL des résultats de cette session et passage FAILED.
-8. Nettoyage du fichier uploadé dans finally ; nettoyage des fichiers de lecture à la fermeture.
+1. L’API contrôle année, taille, extension, magic bytes et archive ; elle stocke
+   sous une clé UUID dans un bucket privé et crée `ImportExecution QUEUED`.
+2. Elle déclenche un Cloud Run Job avec l’importId puis répond 202 avec Location.
+3. Le worker télécharge la source et prévalide toutes les lignes sans créer de
+   session métier. Un fichier invalide devient FAILED, sans nouvelle ExamSession.
+4. Après validation seulement, réservation transactionnelle du triplet et Batch
+   par chunks de 500. Résultats et compteurs de progression commitent ensemble.
+5. READY après concordance des comptes ; publication explicite inchangée.
+6. Échec traité : nettoyage de la session et FAILED atomiques. La source est
+   supprimée après READY/FAILED ; une interruption conserve la source pour reprise.
 
-Les cinq champs historiques de réponse restent présents. Champs supplémentaires :
-`readRows`, `rejectedRows`, `durationMs`, `errors` et `ignoredColumns`.
-`importedRows` représente les lignes conservées (zéro après nettoyage d'un échec).
-`rejectedRows` compte les défauts de lignes identifiés, pas toutes les lignes non lues.
-L'import est strict : aucune ligne erronée n'est ignorée pour rendre le fichier READY.
-Les erreurs de prévalidation renvoient HTTP 400 et une seule entrée technique dans
-`errors` : examen, ligne Excel (1-based), champ, raison, valeur masquée. La ligne 0
-signale une erreur globale. Un échec Batch retourne son statut et son identifiant,
-avec un diagnostic technique générique si aucune ligne précise n'est identifiable.
+`GET /api/admin/imports/{importId}` donne statut, compteurs, pourcentage et erreurs
+contrôlées ; `GET /api/admin/imports?limit=20` liste les imports récents. ADMIN requis.
+Le DTO final historique `ImportJobResponse` n’est plus le contrat HTTP. Un mauvais
+fichier métier est désormais signalé via le GET après 202, et non par HTTP 400 du
+POST. `ignored_columns` reste enregistré pour le diagnostic technique interne.
+Aucune ligne invalide n’est ignorée : `rejectedRows=0`, erreur bloquante dans `errors`.
 
 ## Formats et validation
 
@@ -130,8 +129,10 @@ supprimées ou sur un fichier temporaire déjà nettoyé.
 
 Le verrou transactionnel protège aussi la création d'une session inexistante et
 fonctionne avec un pooler transactionnel. La contrainte unique protège le triplet.
-Deux sessions NORMAL/COMPLEMENTARY distinctes peuvent être réservées indépendamment
-sur des instances différentes. Une seule lecture/import par JVM limite la mémoire.
+Deux sessions NORMAL/COMPLEMENTARY restent indépendantes. Le worker utilise en plus
+un verrou PostgreSQL de session pour limiter globalement la charge à un import.
+Ce verrou exige une connexion directe ou un pooler SESSION pour le Job ; la
+compatibilité pooler transactionnel du seul verrou métier ne suffit pas.
 
 Publication : READY non vide, avec compte réel cohérent. DRAFT, IMPORTING et FAILED
 sont refusés. Publier une session déjà PUBLISHED est idempotent.
@@ -140,7 +141,8 @@ sont refusés. Publier une session déjà PUBLISHED est idempotent.
 La session peut rester IMPORTING, avec des chunks partiels, et des fichiers peuvent
 rester orphelins. Elle n'est ni visible publiquement ni publiable ; aucune reprise
 concurrente automatique n'est permise. L'opérateur doit confirmer l'arrêt du job
-avant une récupération contrôlée. Ne pas marquer automatiquement FAILED une session
+avant de relancer le worker avec le même importId : nettoyage puis reprise complète.
+Ne pas marquer automatiquement FAILED une session
 sur un simple dépassement de délai HTTP : le job peut encore fonctionner.
 
 ## Mémoire et performance
@@ -202,9 +204,8 @@ messages de validation ne contiennent pas de valeur nominative. Les métadonnée
 Batch conservent les compteurs et l'erreur technique ; aucun stockage massif
 supplémentaire d'erreurs n'est créé.
 
-Le lancement est toujours synchrone dans la requête HTTP. Un timeout HTTP ne prouve
-pas l'arrêt du job. Pour une exploitation répétée proche des limites de temps,
-ou pour une récupération fiable après arrêt d'instance, évaluer ultérieurement
-Cloud Run Jobs et un stockage de fichiers durable. Aucune migration d'infrastructure
-n'est réalisée dans P2-E. Le système actuel ne garantit pas un import achevé après
-interruption forcée d'une instance.
+Le lancement HTTP est désormais durable et asynchrone : voir
+[ASYNC_IMPORTS.md](ASYNC_IMPORTS.md) pour le worker sans Tomcat, GCS privé,
+le fencing des tentatives, les états abandonnés et les limites du dispatch.
+Le preflight et le moteur restent synchrones **dans le processus Job**.
+Aucune infrastructure cloud n’a été modifiée pendant P4-C.

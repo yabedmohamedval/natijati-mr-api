@@ -1,0 +1,6 @@
+title: Natijati import worker objects
+description: Read and delete import source objects only
+stage: GA
+includedPermissions:
+  - storage.objects.get
+  - storage.objects.delete

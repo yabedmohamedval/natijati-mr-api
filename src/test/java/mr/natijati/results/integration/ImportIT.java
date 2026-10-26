@@ -153,11 +153,17 @@ class ImportIT extends ImportIntegrationSupport {
     }
 
     @Test void apiReturnsBoundedTechnicalDiagnosticWithoutPersonalValue() throws Exception {
-        mvc.perform(multipart("/api/admin/imports").file(new MockMultipartFile("file","test.xlsx","application/octet-stream",excel(ExamType.BAC,1,false,true)))
+        var result=mvc.perform(multipart("/api/admin/imports").file(new MockMultipartFile("file","test.xlsx","application/octet-stream",excel(ExamType.BAC,1,false,true)))
             .param("examType","BAC").param("year","2026").with(httpBasic("integration-admin","synthetic-test-password")))
-            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.length()").value(1))
-            .andExpect(jsonPath("$.errors[0].rowNumber").value(2)).andExpect(jsonPath("$.errors[0].field").value("MOY_BAC"))
-            .andExpect(jsonPath("$.errors[0].value").value("[masquée]"));
+            .andExpect(status().isAccepted()).andReturn();
+        var id=java.util.UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(result.getResponse().getContentAsString()).get("importId").asText());
+        worker.run(id,"synthetic-worker");
+        mvc.perform(get("/api/admin/imports/"+id).with(httpBasic("integration-admin","synthetic-test-password")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.errors.length()").value(1))
+            .andExpect(jsonPath("$.errors[0].code").value("VALIDATION_FAILED"))
+            .andExpect(jsonPath("$.sessionId").isEmpty())
+            .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Synthetic candidate"))));
         noTemporaryFiles();
     }
     @Test void differentSessionReservationsCanProceedConcurrently() throws Exception {

@@ -85,8 +85,18 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  import-provider: ${IMPORT_PROVIDER:gcp}
+  import-bucket: ${IMPORT_BUCKET:}
+  import-job-name: ${IMPORT_JOB_NAME:}
   import-directory: ${IMPORT_DIRECTORY:./imports}
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD}
   import-max-rows: ${APP_IMPORT_MAX_ROWS:150000}
+
+# Framework exception dumps can contain PostgreSQL row details. Import logs above are controlled.
+logging:
+  level:
+    org.springframework.batch: OFF
+    org.hibernate.engine.jdbc: OFF
+    org.hibernate.orm.jdbc: OFF

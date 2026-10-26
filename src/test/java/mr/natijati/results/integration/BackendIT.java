@@ -45,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "spring.flyway.url=", "spring.flyway.user=", "spring.flyway.password=",
     "app.admin.username=integration-admin", "app.admin.password=synthetic-test-password"
 })
+@org.springframework.context.annotation.Import(AsyncImportTestConfiguration.class)
 @AutoConfigureMockMvc
 @Transactional
 class BackendIT {

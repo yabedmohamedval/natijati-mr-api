@@ -15,5 +15,10 @@ public class ImportExceptionHandler {
     ResponseEntity<ValidationError> invalid(InvalidExamRowException ex, HttpServletRequest request) {
         return ResponseEntity.badRequest().body(new ValidationError(OffsetDateTime.now(),400,"Bad Request",ex.getMessage(),request.getRequestURI(),List.of(ex.getIssue())));
     }
+    @ExceptionHandler(java.io.IOException.class)
+    ResponseEntity<ValidationError> storageFailure(java.io.IOException ex, HttpServletRequest request) {
+        return ResponseEntity.status(503).body(new ValidationError(OffsetDateTime.now(),503,"Service Unavailable",
+            "Stockage import indisponible ; réessayer",request.getRequestURI(),List.of()));
+    }
     record ValidationError(OffsetDateTime timestamp, int status, String error, String message, String path, List<ImportIssue> errors) { }
 }

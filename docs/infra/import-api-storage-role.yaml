@@ -1,0 +1,7 @@
+title: Natijati import API objects
+description: Create, read and delete import source objects only
+stage: GA
+includedPermissions:
+  - storage.objects.create
+  - storage.objects.get
+  - storage.objects.delete

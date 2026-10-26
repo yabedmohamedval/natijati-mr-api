@@ -54,7 +54,7 @@ flowchart LR
     Services --> Native[SQL natif : catalogue / agrégations]
     JPA --> DB[(PostgreSQL)]
     Native --> DB
-    Flyway[Flyway V1] --> DB
+    Flyway[Flyway V1 / V2 / V3] --> DB
     Batch[Spring Batch : métadonnées des jobs] --> DB
 ```
 
@@ -79,27 +79,35 @@ Spring Batch sont initialisées séparément par la configuration Batch.
 
 ```mermaid
 flowchart TD
-    Upload[Upload authentifié] --> File[Stockage temporaire contrôlé]
-    File --> Preflight[Validation complète : aucune écriture métier]
-    Preflight --> Lock[Verrou PostgreSQL et réservation IMPORTING]
-    Lock --> Reader[XLSX SAX / XLS workbook]
-    Reader --> Processor[Validation et normalisation des lignes]
-    Processor --> Writer[JPA : chunks de 500]
-    Writer --> Ready[READY non vide]
-    Ready --> Published[PUBLISHED après action admin]
-    Writer --> Failed[Échec traité : DELETE session results et FAILED]
-    Failed --> Retry[Nouvel essai complet autorisé]
+    Upload[Upload admin] --> Storage[GCS privé : objet UUID]
+    Storage --> Execution[ImportExecution QUEUED]
+    Execution --> Dispatch[Cloud Run jobs.run : importId]
+    Dispatch --> Worker[Même image : APP_MODE=import-worker, sans Tomcat]
+    Worker --> Preflight[Validation complète existante]
+    Preflight --> Session[Réservation ExamSession IMPORTING]
+    Session --> Batch[Batch : chunks de 500]
+    Batch --> Progress[Résultats + progression : même transaction]
+    Progress --> Ready[READY]
+    Progress --> Failed[Échec traité : nettoyage + FAILED]
+    Ready --> Publish[PUBLISHED : action admin séparée]
+    Admin[GET admin par UUID] --> Execution
 ```
 
-La prévalidation lit le fichier avant réservation. Batch le relit, avec une
-JobInstance distincte par tentative. Les chunks commitent réellement ; le nettoyage
-sur échec traité est compensatoire, pas un rollback unique du fichier entier.
-Les données intermédiaires restent non publiques. Un import READY/PUBLISHED n’est
-jamais remplacé silencieusement. Les fichiers temporaires sont nettoyés sur les
-chemins traités ; un arrêt brutal peut empêcher ce nettoyage.
+Le POST renvoie 202 après stockage durable, création DB et dispatch, sans attendre
+le preflight. Les validations métier et la précision V2 sont conservées. V3 crée
+une tentative technique séparée de la session métier. Les chunks commitent
+réellement ; leur progression est atomique avec les résultats, le nettoyage sur
+échec est compensatoire. Aucune donnée intermédiaire n’est publique.
 
-Le détail des validations, compteurs, codes d’erreur et commandes de volume est
-centralisé dans [IMPORTS.md](IMPORTS.md). Éviter de dupliquer cette politique.
+Un verrou worker PostgreSQL de session (connexion directe ou pooler SESSION)
+et un contrôle de tentative verrouillé par chunk empêchent deux workers de traiter
+le même import. Après interruption : nettoyage puis preflight et import depuis
+zéro avec une nouvelle JobInstance ; `preventRestart()` reste actif.
+Les sources sont supprimées après état terminal, avec lifecycle de sécurité.
+Publication explicite et refus de remplacer READY/PUBLISHED inchangés.
+
+Voir [ASYNC_IMPORTS.md](ASYNC_IMPORTS.md) pour le contrat admin, la récupération et
+les commandes GCP préparées, et [IMPORTS.md](IMPORTS.md) pour les règles Excel.
 
 ## Sécurité et confidentialité
 
@@ -145,10 +153,12 @@ Cloud Run reçoit l’image construite par Docker via Artifact Registry ; Secret
 Manager fournit les secrets selon la configuration de déploiement. Rien dans ces
 dépôts ne provisionne ni n’atteste les droits IAM effectifs.
 
-L’import reste dans la requête HTTP. La cible annoncée de 1 GiB, 1 CPU et 300 s
-n’est pas reproduite par les tests locaux ; `/tmp/imports` et les spools consomment
-aussi la mémoire sur Cloud Run. Une coupure peut laisser IMPORTING et des données
-partielles non publiques : intervention contrôlée, pas de libération automatique.
+L’import s’exécute dans un Cloud Run Job à configurer ultérieurement, avec le même
+digest d’image que l’API. Proposition initiale : 1 tâche, 1 CPU, 2 GiB, 7 200 s,
+2 retries. `/tmp/imports` et les spools consomment aussi la mémoire du Job. Une
+coupure laisse un état actif récupérable par relance du même UUID, avec nettoyage
+avant reprise. Il n’y a pas de reconciler automatique dans cette phase.
+Le timeout HTTP de 3 600 s pourra être abaissé après recette de l’async.
 
 À suivre avant une exploitation à forte charge : budget de connexions du pooler, latence des inserts JPA IDENTITY,
 quotas et limites HTTP, supervision et récupération opérateur. Le binding Hikari est vérifié sur la datasource réelle (`DB_POOL_SIZE` → maximumPoolSize).
@@ -168,7 +178,7 @@ La politique et les paramètres de pool sont détaillés dans le [README](../REA
 
 **Contexte :** domaine limité, besoin de transactions cohérentes et maintenance personnelle.
 **Décision :** Spring Boot modulaire par responsabilités, Angular séparé ; pas de microservices.
-**Conséquence :** livraison simple ; import et consultation partagent les ressources backend.
+**Conséquence :** une image commune ; l’import utilise désormais un processus Job distinct.
 **Réexamen :** uniquement si des contraintes mesurées imposent d’isoler l’exécution des imports.
 
 ### D2 — Ne pas cacher les résultats nominatifs dans la PWA
@@ -192,3 +202,11 @@ une reprise sur fichier supprimé et résultats nettoyés serait ambiguë.
 
 Ces fiches explicitent les choix actuels ; elles ne prétendent pas reconstituer
 l’historique complet des décisions de déploiement.
+
+### D5 — Import durable via GCS privé et Cloud Run Jobs
+
+**Contexte :** arrêt réel de l’instance API après 47 500 / 121 140 lignes C1AS,
+avec session IMPORTING et Batch STARTED.
+**Décision :** POST 202, source durable privée, ImportExecution V3 et worker sans HTTP.
+**Conséquence :** progression persistée et reprise complète testée après kill ; IAM,
+bucket et Job restent à provisionner manuellement. Pas de dépendance à `@Async`.

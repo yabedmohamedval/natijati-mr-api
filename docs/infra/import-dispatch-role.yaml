@@ -1,0 +1,6 @@
+title: Natijati import dispatcher
+description: Execute the configured import job with an importId override
+stage: GA
+includedPermissions:
+  - run.jobs.run
+  - run.jobs.runWithOverrides

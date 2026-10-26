@@ -117,7 +117,9 @@ explicitement l’autre session, sans fallback vers la session normale.
 | GET | `/api/public/catalog/statistics/{examType}/{year}` | Statistiques |
 | GET | `/api/public/catalog/institutions` | Liste avec `examType`, `year`, pagination |
 | GET | `/api/public/catalog/institutions/{id}` | Détail d’un identifiant fourni par la liste |
-| POST | `/api/admin/imports` | Multipart `file`, `examType`, `year`, `sessionType` |
+| POST | `/api/admin/imports` | Multipart ; HTTP 202 avec importId, traitement asynchrone |
+| GET | `/api/admin/imports/{importId}` | Statut et progression, ADMIN |
+| GET | `/api/admin/imports?limit=20` | Imports récents, ADMIN |
 | POST | `/api/admin/imports/{sessionId}/publish` | Publication d’une session prête |
 
 Pour la recherche C1AS, le paramètre historique `candidateNumber` transporte le
@@ -132,7 +134,10 @@ choix pour documenter le portfolio/API ; les opérations admin restent authentif
 
 ```mermaid
 flowchart TD
-    Excel[Upload Excel] --> Validation[Prévalidation complète]
+    Excel[Upload Excel] --> Durable[GCS privé + ImportExecution QUEUED]
+    Durable --> Accepted[HTTP 202 + importId]
+    Durable --> Worker[Cloud Run Job : même image sans Tomcat]
+    Worker --> Validation[Prévalidation complète]
     Validation --> Reservation[Réservation transactionnelle IMPORTING]
     Reservation --> Batch[Spring Batch : Reader / Processor / Writer]
     Batch --> Ready[READY]
@@ -147,12 +152,18 @@ flowchart TD
   session ; ils ne sont jamais considérés comme publiés.
 - Second import refusé pour `IMPORTING`, `READY` et `PUBLISHED`, même si le fichier
   diffère. Une session `FAILED` peut être réimportée intégralement.
-- Verrou transactionnel PostgreSQL par triplet ; un import actif par JVM.
-- Nettoyage des uploads dans `finally` et des spools à la fermeture du reader.
-- Limites : 50 MiB, 100 000 lignes par défaut, une feuille, 64 colonnes.
+- Réservation DB par triplet ; verrou PostgreSQL global entre workers et contrôle de tentative par chunk.
+- Source durable supprimée après READY/FAILED ; reprise complète après interruption.
+- Limites : 50 MiB, 150 000 lignes par défaut, une feuille, 64 colonnes.
 
 Le contrat, les headers précis, la politique des erreurs, l’atomicité et les limites
 sont décrits dans [docs/IMPORTS.md](docs/IMPORTS.md).
+Le POST admin a changé de contrat : 202 puis GET, sans consommateur frontend trouvé.
+Voir [docs/ASYNC_IMPORTS.md](docs/ASYNC_IMPORTS.md) pour V3, le worker,
+la récupération et toutes les commandes GCP préparées **mais non exécutées**.
+Le worker requiert une connexion PostgreSQL directe ou un pooler SESSION.
+En local, les routes publiques fonctionnent comme avant ; les imports nécessitent
+la configuration GCS/Job. Les tests utilisent exclusivement des adaptateurs locaux.
 
 ## Tests et qualité
 

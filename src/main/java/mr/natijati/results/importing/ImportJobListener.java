@@ -10,13 +10,32 @@ import java.time.LocalDateTime;
 public class ImportJobListener implements JobExecutionListener {
     private static final Logger log = LoggerFactory.getLogger(ImportJobListener.class);
     private final ExamSessionService sessions;
-    public ImportJobListener(ExamSessionService sessions) { this.sessions = sessions; }
+    private final mr.natijati.results.importing.async.ImportWorkerTransactions transactions;
+    public ImportJobListener(ExamSessionService sessions, mr.natijati.results.importing.async.ImportWorkerTransactions transactions) {
+        this.sessions = sessions; this.transactions = transactions;
+    }
 
     @Override public void beforeJob(JobExecution execution) {
-        sessions.markImporting(execution.getJobParameters().getLong("sessionId"));
+        if (execution.getJobParameters().getString("importId") != null) {
+            transactions.beforeBatch(java.util.UUID.fromString(execution.getJobParameters().getString("importId")),
+                execution.getJobParameters().getLong("importAttempt").intValue(), execution.getId());
+        } else sessions.markImporting(execution.getJobParameters().getLong("sessionId"));
     }
 
     @Override public void afterJob(JobExecution execution) {
+        if (execution.getJobParameters().getString("importId") != null) {
+            var importId = java.util.UUID.fromString(execution.getJobParameters().getString("importId"));
+            int attempt = execution.getJobParameters().getLong("importAttempt").intValue();
+            try {
+                if (execution.getStatus() == BatchStatus.COMPLETED) transactions.ready(importId, attempt);
+                else transactions.failed(importId, attempt, "BATCH_FAILED");
+            } catch (RuntimeException failure) {
+                execution.setStatus(BatchStatus.FAILED);
+                execution.setExitStatus(ExitStatus.FAILED);
+                log.error("import_finalization_recovery_required importId={} jobExecutionId={}", importId, execution.getId());
+            }
+            return;
+        }
         Long id = execution.getJobParameters().getLong("sessionId");
         long written = execution.getStepExecutions().stream().mapToLong(StepExecution::getWriteCount).sum();
         try {
